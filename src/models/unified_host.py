@@ -72,6 +72,7 @@ class UnifiedHost(BaseModel):
     # --- Network Information ---
     public_ip: Optional[str] = None
     private_ip: Optional[str] = None
+    default_gateway: Optional[str] = None
     network_interfaces: List[NetworkInterface] = Field(default_factory=list)
 
     # --- Contextual & Security Information ---

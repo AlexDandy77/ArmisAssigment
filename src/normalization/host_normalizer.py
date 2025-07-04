@@ -49,8 +49,10 @@ class HostNormalizer:
 
         # --- Network Interfaces ---
         network_interfaces = []
+        default_gateway = None
         for iface_data in interfaces_list:
             iface = iface_data.get('HostAssetInterface', {})
+            default_gateway = iface.get('gatewayAddress') if '.' in iface.get('gatewayAddress', '') else None
             if iface.get('macAddress') or iface.get('address'):
                 network_interfaces.append(
                     NetworkInterface(
@@ -108,7 +110,7 @@ class HostNormalizer:
             primary_mac_address=primary_mac,
             cloud_instance_id=ec2_info.get('instanceId'),
             source_ids={"qualys_id": str(raw_host.get('id'))},
-            hostname=raw_host.get('dnsHostName'),
+            hostname=raw_host.get('name'),
             os_name=raw_host.get('os'),
             os_platform=agent_info.get('platform'),
             last_boot_timestamp=raw_host.get('lastSystemBoot'),
@@ -119,6 +121,7 @@ class HostNormalizer:
             total_memory_mb=raw_host.get('totalMemory'),
             public_ip=ec2_info.get('publicIpAddress'),
             private_ip=raw_host.get('address'),
+            default_gateway=default_gateway,
             network_interfaces=network_interfaces,
             cloud_context=cloud_context,
             qualys_security=qualys_security,
@@ -173,8 +176,10 @@ class HostNormalizer:
             total_memory_mb=None,
             public_ip=raw_host.get('external_ip'),
             private_ip=raw_host.get('local_ip'),
+            default_gateway=raw_host.get('default_gateway_ip'),
             network_interfaces=[
-                NetworkInterface(mac_address=raw_host.get('mac_address', '').replace('-', ':'))
+                NetworkInterface(mac_address=raw_host.get('mac_address', '').replace('-', ':'),
+                                 private_ip_v4=raw_host.get('local_ip', ''))
             ],
             cloud_context=cloud_context,
             crowdstrike_security=crowdstrike_security,
