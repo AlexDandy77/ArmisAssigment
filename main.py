@@ -4,6 +4,7 @@ from src.api_clients.crowdstrike_client import CrowdStrikeApiClient
 from src.api_clients.qualys_client import QualysApiClient
 from src.normalization.host_normalizer import HostNormalizer
 from src.deduplication.deduplicator import Deduplicator
+from src.analysis.visualizer import AssetVisualizer
 
 def process_source(client, source, deduplicator):
     print(f"\n--- Processing source: {source} ---")
@@ -17,8 +18,7 @@ def process_source(client, source, deduplicator):
     print(f"--- Finished {source}. Processed {count} hosts. ---")
 
 def main():
-    db_pass: str = os.getenv("DB_PASSWORD")
-    mongo_client = MongoClient(f"mongodb+srv://AlexDandy77:{db_pass}@main.0umme3r.mongodb.net/?retryWrites=true&w=majority&appName=main")
+    mongo_client = MongoClient(os.getenv("MONGO_URI"))
 
     try:
         mongo_client.admin.command('ping')
@@ -37,6 +37,10 @@ def main():
     process_source(qualys_client, "Qualys", deduplicator)
     process_source(crowdstrike_client, "CrowdStrike", deduplicator)
     print("\n--- Pipeline Complete. Data has been fetched, normalized, and merged in MongoDB. ---")
+
+    print("\n--- Visualizing process. ---")
+    visualizer = AssetVisualizer(db)
+    visualizer.run_analysis()
 
 if __name__ == "__main__":
     main()

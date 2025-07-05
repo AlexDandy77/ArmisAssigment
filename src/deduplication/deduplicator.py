@@ -105,7 +105,7 @@ class Deduplicator:
         for source, source_id in incoming_host.source_ids.items():
             update_payload["$set"][f"source_ids.{source}"] = source_id
 
-        update_payload["$set"]["record_last_updated_at"] = datetime.datetime.now(datetime.UTC).isoformat() + "Z"
+        update_payload["$set"]["record_last_updated_at"] = datetime.datetime.utcnow().isoformat() + "Z"
 
         return update_payload
 
