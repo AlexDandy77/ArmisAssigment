@@ -16,9 +16,37 @@ class HostNormalizer:
             return self._normalize_qualys_host(raw_host)
         elif source == "CrowdStrike":
             return self._normalize_crowdstrike_host(raw_host)
+        elif source == "Tenable":
+            return self._normalize_tenable_host(raw_host)
         else:
             print(f"Warning: No normalizer available for source: {source}")
             return None
+
+    def _normalize_tenable_host(self, raw_host: Dict[str, Any]) -> Optional[UnifiedHost]:
+        if not raw_host:
+            return None
+
+        # --- Assemble the UnifiedHost object ---
+        now = datetime.datetime.utcnow().isoformat() + "Z"
+        unified_host = UnifiedHost(
+            primary_mac_address=raw_host.get('display_mac_address'),
+            cloud_instance_id=raw_host.get('aws_ec2_instance_id'),
+            source_ids={"tenable_id": raw_host.get('id')},
+            hostname=raw_host.get('host_name'),
+            os_name=None,
+            os_platform=None,
+            kernel_version=None,
+            public_ip=raw_host.get('display_ipv4_address'),
+            private_ip=None,
+            cloud_context=None,
+            tenable_security=None,
+            installed_software=None,
+            network_interfaces=None,
+            record_created_at=now,
+            record_last_updated_at=now
+        )
+        return unified_host
+
 
     def _normalize_qualys_host(self, raw_host: Dict[str, Any]) -> Optional[UnifiedHost]:
         if not raw_host:
@@ -48,19 +76,49 @@ class HostNormalizer:
                     break
 
         # --- Network Interfaces ---
-        network_interfaces = []
+        grouped_interfaces = {}
         default_gateway = None
+        public_ip_from_list = None
+
         for iface_data in interfaces_list:
             iface = iface_data.get('HostAssetInterface', {})
-            default_gateway = iface.get('gatewayAddress') if '.' in iface.get('gatewayAddress', '') else None
-            if iface.get('macAddress') or iface.get('address'):
-                network_interfaces.append(
-                    NetworkInterface(
-                        mac_address=iface.get('macAddress'),
-                        private_ip_v4=iface.get('address') if '.' in iface.get('address', '') else None,
-                        ip_v6=iface.get('address') if ':' in iface.get('address', '') else None
-                    )
-                )
+            mac = iface.get('macAddress')
+            address = iface.get('address')
+
+            if not mac and address and '.' in address:
+                # This is likely the public IP entry
+                public_ip_from_list = address
+                continue
+
+            if not mac:
+                continue
+
+            if mac not in grouped_interfaces:
+                grouped_interfaces[mac] = {
+                    "mac_address": mac,
+                    "private_ip_v4": None,
+                    "public_ip_v4": None,
+                    "ip_v6": None,
+                    "sources": ['Qualys']
+                }
+
+            if iface.get('gatewayAddress'):
+                default_gateway = iface.get('gatewayAddress')
+
+            if address:
+                if ':' in address:  # IPv6
+                    grouped_interfaces[mac]['ip_v6'] = address
+                elif address.startswith(('10.', '172.', '192.168.')):  # Private IPv4
+                    grouped_interfaces[mac]['private_ip_v4'] = address
+                else:  # Assumed Public IPv4
+                    grouped_interfaces[mac]['public_ip_v4'] = address
+
+        # Assign the standalone public IP to the primary interface if it wasn't already found
+        if public_ip_from_list and primary_mac and primary_mac in grouped_interfaces:
+            if not grouped_interfaces[primary_mac]['public_ip_v4']:
+                grouped_interfaces[primary_mac]['public_ip_v4'] = public_ip_from_list
+
+        network_interfaces = [NetworkInterface(**data) for data in grouped_interfaces.values()]
 
         # --- Security Info ---
         qualys_security = QualysSecurityInfo(
@@ -84,8 +142,9 @@ class HostNormalizer:
         # --- Software Inventory ---
         installed_software = [
             Software(
-                name=sw.get('HostAssetSoftware', {}).get('name'),
-                version=sw.get('HostAssetSoftware', {}).get('version')
+                product=sw.get('HostAssetSoftware', {}).get('name'),
+                version=sw.get('HostAssetSoftware', {}).get('version'),
+                sources=['Qualys']
             )
             for sw in _safe_get_list(raw_host, 'software')
             if sw.get('HostAssetSoftware', {}).get('name')
@@ -130,6 +189,7 @@ class HostNormalizer:
             record_last_updated_at=now
         )
         return unified_host
+
 
     def _normalize_crowdstrike_host(self, raw_host: Dict[str, Any]) -> Optional[UnifiedHost]:
         if not raw_host:
@@ -179,7 +239,8 @@ class HostNormalizer:
             default_gateway=raw_host.get('default_gateway_ip'),
             network_interfaces=[
                 NetworkInterface(mac_address=raw_host.get('mac_address', '').replace('-', ':'),
-                                 private_ip_v4=raw_host.get('local_ip', ''))
+                                 private_ip_v4=raw_host.get('local_ip', ''),
+                                 sources=['CrowdStrike'])
             ],
             cloud_context=cloud_context,
             crowdstrike_security=crowdstrike_security,

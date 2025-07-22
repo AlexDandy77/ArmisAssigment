@@ -6,7 +6,9 @@ class NetworkInterface(BaseModel):
     """Represents a single network interface on the host."""
     mac_address: Optional[str] = None
     private_ip_v4: Optional[str] = None
+    public_ip_v4: Optional[str] = None
     ip_v6: Optional[str] = None
+    sources: List[str] = Field(default_factory=list)
 
 
 class CloudContext(BaseModel):
@@ -42,8 +44,10 @@ class CrowdStrikeSecurityInfo(BaseModel):
 
 class Software(BaseModel):
     """Represents a single piece of installed software."""
-    name: str
+    vendor: Optional[str] = None
+    product: str
     version: Optional[str] = None
+    sources: List[str] = Field(default_factory=list)
 
 
 class UnifiedHost(BaseModel):
@@ -84,5 +88,5 @@ class UnifiedHost(BaseModel):
     installed_software: List[Software] = Field(default_factory=list)
 
     # --- Metadata ---
-    record_created_at: str
-    record_last_updated_at: str
+    record_created_at: Optional[str] = None
+    record_last_updated_at: Optional[str] = None

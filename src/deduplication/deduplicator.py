@@ -122,9 +122,9 @@ class Deduplicator:
                 best_match = candidate_doc
 
         if highest_score > self.CONFIDENCE_THRESHOLD:
-            print(f"Confident match found (Score: {highest_score}). Merging with host ID: {best_match['_id']}")
+            print(f"Confident match found (Score: {highest_score}). Merging with host ID: {best_match['_id']}\n")
             update_operation = self._merge_hosts(host, best_match)
             self.collection.update_one({"_id": best_match["_id"]}, update_operation)
         else:
-            print("No confident match found. Inserting as new host.")
+            print("No confident match found. Inserting as new host.\n")
             self.collection.insert_one(host.model_dump())

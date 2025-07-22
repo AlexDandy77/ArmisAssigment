@@ -2,6 +2,8 @@ import os
 from pymongo import MongoClient
 from src.api_clients.crowdstrike_client import CrowdStrikeApiClient
 from src.api_clients.qualys_client import QualysApiClient
+from src.api_clients.tenable_client import TenableApiClient
+
 from src.normalization.host_normalizer import HostNormalizer
 from src.deduplication.deduplicator import Deduplicator
 from src.analysis.visualizer import AssetVisualizer
@@ -32,10 +34,12 @@ def main():
 
     qualys_client = QualysApiClient()
     crowdstrike_client = CrowdStrikeApiClient()
+    tenable_client = TenableApiClient()
 
     print("\n--- Starting the Pipeline. ---")
     process_source(qualys_client, "Qualys", deduplicator)
     process_source(crowdstrike_client, "CrowdStrike", deduplicator)
+    process_source(tenable_client, "Tenable", deduplicator)
     print("\n--- Pipeline Complete. Data has been fetched, normalized, and merged in MongoDB. ---")
 
     print("\n--- Visualizing process. ---")
