@@ -7,7 +7,8 @@ from src.models.unified_host import (
     CloudContext,
     QualysSecurityInfo,
     CrowdStrikeSecurityInfo,
-    Software
+    Software,
+    TenableSecurityInfo, TenableTag, TenableMitigation
 )
 
 class HostNormalizer:
@@ -26,6 +27,116 @@ class HostNormalizer:
         if not raw_host:
             return None
 
+        # Helper functions
+        def _parse_cpe(cpe_string: str) -> Optional[Software]:
+            try:
+                parts = cpe_string.split(":")
+                if len(parts) >= 5:
+                    return Software(
+                        vendor=parts[2],
+                        product=parts[3],
+                        version=parts[4],
+                        sources=['Tenable']
+                    )
+            except Exception:
+                return None
+
+        def _parse_os(os_str: str) -> tuple[str, str, str]:
+            os_nam = os_str
+            platform = "Unknown"
+            kernel = None
+
+            if " on " in os_str:
+                parts = os_str.split(" on ")
+                os_nam = parts[1]
+                kernel_part = parts[0]
+                if "Kernel" in kernel_part:
+                    kernel = kernel_part.split("Kernel ")[1]
+
+            if "Linux" in os_nam:
+                platform = "Linux"
+            elif "Windows" in os_nam:
+                platform = "Windows"
+
+            return os_nam, platform, kernel
+
+
+        # --- Data Extraction ---
+        os_string = raw_host.get("operating_systems")[0]
+        os_name, os_platform, kernel_version = _parse_os(os_string)
+
+        # --- Cloud Context ---
+        cloud_context = CloudContext(
+            provider="AWS",
+            account_id=raw_host.get("aws_owner_id"),
+            instance_id=raw_host.get("aws_ec2_instance_id"),
+            instance_type=raw_host.get("aws_ec2_instance_type"),
+            region=raw_host.get("aws_region"),
+            availability_zone=raw_host.get("aws_availability_zone"),
+            image_id=raw_host.get("aws_ec2_instance_ami_id"),
+            vpc_id=raw_host.get("aws_vpc_id"),
+            subnet_id=raw_host.get("aws_subnet_id"),
+        )
+
+        # --- Tenable Security ---
+        tags_data = raw_host.get("tags", [])
+        mitigations_data = raw_host.get("mitigations", [])
+
+        tags = [
+            TenableTag(
+                id=tag.get("id"),
+                category=tag.get("category"),
+                value=tag.get("value"),
+                type=tag.get("type")
+            ) for tag in tags_data
+        ]
+
+        mitigations = [
+            TenableMitigation(
+                id=mit.get("id"),
+                vendor_name=mit.get("vendor_name"),
+                product_name=mit.get("product_name"),
+                version=mit.get("version"),
+                form_factor=mit.get("form_factor"),
+                last_detected=mit.get("last_Detected")
+            ) for mit in mitigations_data
+        ]
+
+        tenable_security = TenableSecurityInfo(
+            has_agent=raw_host.get("has_agent"),
+            last_authenticated_scan_time=raw_host.get("last_authenticated_scan_time"),
+            vulnerability_counts=raw_host.get("vuln_counts", {}),
+            tags=tags,
+            mitigations=mitigations
+        )
+
+        # --- Software Inventory ---
+        installed_software = [
+            parsed for cpe in raw_host.get("installed_software", [])
+            if (parsed := _parse_cpe(cpe)) is not None
+        ]
+
+        # --- Network Interfaces ---
+        mac_addresses = raw_host.get("mac_addresses", [])
+        ipv4_addresses = raw_host.get("ipv4_addresses", [])
+        ipv6_addresses = raw_host.get("ipv6_addresses", [])
+
+        network_interfaces = [
+            NetworkInterface(mac_address=mac, sources=['Tenable']) for mac in mac_addresses
+        ]
+
+        if network_interfaces:
+            # Separate public and private IPs
+            private_ips = [ip for ip in ipv4_addresses if ip.startswith(('10.', '172.', '192.168.'))]
+            public_ips = [ip for ip in ipv4_addresses if ip not in private_ips]
+
+            if private_ips:
+                network_interfaces[0].private_ip_v4 = private_ips[0]
+            if public_ips:
+                network_interfaces[0].public_ip_v4 = public_ips[0]
+            if ipv6_addresses:
+                network_interfaces[0].ip_v6 = ipv6_addresses[0]
+
         # --- Assemble the UnifiedHost object ---
         now = datetime.datetime.utcnow().isoformat() + "Z"
         unified_host = UnifiedHost(
@@ -33,15 +144,15 @@ class HostNormalizer:
             cloud_instance_id=raw_host.get('aws_ec2_instance_id'),
             source_ids={"tenable_id": raw_host.get('id')},
             hostname=raw_host.get('host_name'),
-            os_name=None,
-            os_platform=None,
-            kernel_version=None,
+            os_name=os_name,
+            os_platform=os_platform,
+            kernel_version=kernel_version,
             public_ip=raw_host.get('display_ipv4_address'),
-            private_ip=None,
-            cloud_context=None,
-            tenable_security=None,
-            installed_software=None,
-            network_interfaces=None,
+            private_ip=next((ip for ip in ipv4_addresses if not ip == raw_host.get("display_ipv4_address")), None),
+            cloud_context=cloud_context,
+            tenable_security=tenable_security,
+            installed_software=installed_software,
+            network_interfaces=network_interfaces,
             record_created_at=now,
             record_last_updated_at=now
         )

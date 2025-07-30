@@ -59,51 +59,80 @@ class Deduplicator:
 
     def _merge_hosts(self, incoming_host: UnifiedHost, existing_doc: Dict[str, Any]) -> Dict[str, Any]:
         update_payload = {"$set": {}}
-        incoming_source = list(incoming_host.source_ids.keys())[0]
+        incoming_id = list(incoming_host.source_ids.keys())[0]
+
+        incoming_source = "Unknown"
+        if incoming_id == "qualys_id":
+            incoming_source = "Qualys"
+        elif incoming_id == "crowdstrike_id":
+            incoming_source = "CrowdStrike"
+        elif incoming_id == "tenable_id":
+            incoming_source = "Tenable"
 
         # Merge Logic
         for field in ["hostname", "os_name", "os_platform", "kernel_version", "manufacturer", "product_model",
-                      "processor_info"]:
+                      "processor_info", "public_ip", "private_ip", "last_boot_timestamp", "default_gateway"]:
             new_val = getattr(incoming_host, field)
             if new_val is not None:
                 update_payload["$set"][field] = new_val
 
-        if incoming_host.last_boot_timestamp:
-            update_payload["$set"]["last_boot_timestamp"] = incoming_host.last_boot_timestamp
+        for source, source_id in incoming_host.source_ids.items():
+            update_payload["$set"][f"source_ids.{source}"] = source_id
 
-        if incoming_host.default_gateway:
-            update_payload["$set"]["default_gateway"] = incoming_host.default_gateway
+        # Software
+        existing_software_raw = existing_doc.get("installed_software", [])
+        incoming_software = incoming_host.installed_software or []
+
+        consolidated_software = [s for s in existing_software_raw if incoming_source not in s.get("sources", [])]
+        software_lookup = {(s.get("vendor"), s.get("product"), s.get("version")): s for s in consolidated_software}
+
+        for sw in incoming_software:
+            key = (sw.vendor, sw.product, sw.version)
+            if key in software_lookup:
+                software_lookup[key]["sources"].append(incoming_source)
+                software_lookup[key]["sources"] = sorted(list(set(software_lookup[key]["sources"])))
+            else:
+                consolidated_software.append(sw.model_dump(exclude_none=True))
+
+        update_payload["$set"]["installed_software"] = consolidated_software
 
         # Network interfaces
-        if incoming_source == 'Qualys': # Replacing whole list
-            if incoming_host.network_interfaces is not None:
-                update_payload["$set"]["network_interfaces"] = [iface.model_dump(exclude_none=True) for iface in
-                                                                incoming_host.network_interfaces]
+        existing_interfaces_raw = existing_doc.get("network_interfaces", [])
+        incoming_interfaces = incoming_host.network_interfaces or []
 
-        elif incoming_source == 'CrowdStrike': # Enriching the list only with new interfaces.
-            if incoming_host.network_interfaces:
-                existing_interfaces = existing_doc.get("network_interfaces", [])
-                existing_keys = {(iface.get("mac_address"), iface.get("private_ip_v4")) for iface in
-                                 existing_interfaces}
+        consolidated_interfaces = [i for i in existing_interfaces_raw if incoming_source not in i.get("sources", [])]
+        interface_lookup = {i.get("mac_address"): i for i in consolidated_interfaces if i.get("mac_address")}
 
-                interfaces_to_add = []
-                for new_iface in incoming_host.network_interfaces:
-                    new_key = (new_iface.mac_address, new_iface.private_ip_v4)
-                    if new_key not in existing_keys:
-                        interfaces_to_add.append(new_iface.model_dump(exclude_none=True))
+        for iface in incoming_interfaces:
+            mac = iface.mac_address
+            if mac and mac in interface_lookup:
+                # Interface with this MAC exists, update it
+                existing_iface = interface_lookup[mac]
+                # Merge sources
+                existing_iface["sources"] = sorted(list(set(existing_iface.get("sources", []) + [incoming_source])))
+                # Enrich with potentially new IP info
+                if iface.private_ip_v4: existing_iface["private_ip_v4"] = iface.private_ip_v4
+                if iface.public_ip_v4: existing_iface["public_ip_v4"] = iface.public_ip_v4
+                if iface.ip_v6: existing_iface["ip_v6"] = iface.ip_v6
+            else:
+                consolidated_interfaces.append(iface.model_dump(exclude_none=True))
 
-                if interfaces_to_add:
-                    update_payload.setdefault("$addToSet", {})["network_interfaces"] = {"$each": interfaces_to_add}
+        update_payload["$set"]["network_interfaces"] = consolidated_interfaces
+
+        # Cloud context
+        if incoming_host.cloud_context:
+            merged_cloud_context = (existing_doc.get("cloud_context") or {}).copy()
+            merged_cloud_context.update(
+                {k: v for k, v in incoming_host.cloud_context.model_dump(exclude_none=True).items()})
+            update_payload["$set"]["cloud_context"] = merged_cloud_context
 
         # Merge source-specific security info
         if incoming_host.qualys_security:
-            update_payload["$set"]["qualys_security"] = incoming_host.qualys_security.model_dump()
+            update_payload["$set"]["qualys_security"] = incoming_host.qualys_security.model_dump(exclude_none=True)
         if incoming_host.crowdstrike_security:
-            update_payload["$set"]["crowdstrike_security"] = incoming_host.crowdstrike_security.model_dump()
-
-        # Merge source IDs
-        for source, source_id in incoming_host.source_ids.items():
-            update_payload["$set"][f"source_ids.{source}"] = source_id
+            update_payload["$set"]["crowdstrike_security"] = incoming_host.crowdstrike_security.model_dump(exclude_none=True)
+        if incoming_host.tenable_security:
+            update_payload["$set"]["tenable_security"] = incoming_host.tenable_security.model_dump(exclude_none=True)
 
         update_payload["$set"]["record_last_updated_at"] = datetime.datetime.utcnow().isoformat() + "Z"
 

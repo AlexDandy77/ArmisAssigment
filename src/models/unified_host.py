@@ -42,6 +42,33 @@ class CrowdStrikeSecurityInfo(BaseModel):
     policies: Dict[str, str] = Field(default_factory=dict)
 
 
+class TenableTag(BaseModel):
+    """Represents a single Tenable tag with its category and value."""
+    id: Optional[str] = None
+    category: Optional[str] = None
+    value: Optional[str] = None
+    type: Optional[str] = None
+
+
+class TenableMitigation(BaseModel):
+    """Represents a mitigating control identified by Tenable."""
+    id: Optional[str] = None
+    vendor_name: Optional[str] = None
+    product_name: Optional[str] = None
+    version: Optional[str] = None
+    form_factor: Optional[str] = None,
+    last_detected: Optional[str] = None
+
+
+class TenableSecurityInfo(BaseModel):
+    """Holds security-related data sourced specifically from Tenable."""
+    has_agent: Optional[bool] = None
+    last_authenticated_scan_time: Optional[str] = None
+    vulnerability_counts: Dict[str, int] = Field(default_factory=dict)
+    tags: List[TenableTag] = Field(default_factory=list)
+    mitigations: List[TenableMitigation] = Field(default_factory=list)
+
+
 class Software(BaseModel):
     """Represents a single piece of installed software."""
     vendor: Optional[str] = None
@@ -83,6 +110,7 @@ class UnifiedHost(BaseModel):
     cloud_context: Optional[CloudContext] = None
     qualys_security: Optional[QualysSecurityInfo] = None
     crowdstrike_security: Optional[CrowdStrikeSecurityInfo] = None
+    tenable_security: Optional[TenableSecurityInfo] = None
 
     # --- Inventories ---
     installed_software: List[Software] = Field(default_factory=list)
